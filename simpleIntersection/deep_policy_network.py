@@ -1,6 +1,6 @@
 from keras import Input
 from keras import Model
-from keras.layers import Dense, Activation
+from keras.layers import Dense, Activation,Reshape,LSTM
 from keras.models import load_model
 from keras.optimizers import Adam
 import keras.backend as K
@@ -31,7 +31,10 @@ class Agent(object):
         advantages = Input(shape=[1])
         dense1 = Dense(self.fc1_dims, activation='relu')(input)
         dense2 = Dense(self.fc2_dims, activation='relu')(dense1)
-        probs = Dense(self.n_actions, activation='softmax')(dense2)
+        reshape_layer = Reshape((1, self.fc2_dims))(dense2) 
+        lstm_layer = LSTM(units=64, activation='tanh', return_sequences=False)(reshape_layer)
+
+        probs = Dense(self.n_actions, activation='softmax')(lstm_layer)
 
         def custom_loss(y_true, y_pred):
             x = tf.math.squared_difference(y_true, y_pred)

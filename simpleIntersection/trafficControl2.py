@@ -21,13 +21,16 @@ class State:
             self.lane_vehicle_count[lane_id] = lane_vehicle_count[lane_id]
  
 step = 1 
-agent = Agent(ALPHA=0.0005, input_dims=26, GAMMA=0.99,
-                  n_actions=4, layer1_size=64, layer2_size=64)
+agent = Agent(ALPHA=0.000000005, input_dims=26, GAMMA=0.99,
+                  n_actions=2, layer1_size=128, layer2_size=256)
 score_history = []
 score = 0
 steps_in_phase = 0
 curr_state = {}
 
+s = [0]
+avg = [0]
+vc=[0]
 def performAction(agent,curr_state,tl_id):
     observation = [curr_state[tl_id].phase,curr_state[tl_id].steps_in_phase]
     for lane in curr_state[tl_id].controlled_lanes:
@@ -35,53 +38,37 @@ def performAction(agent,curr_state,tl_id):
         observation.append(curr_state[tl_id].lane_vehicle_count[lane])
     return agent.choose_action(np.array(observation))
 
-x = [0]
-sd = [0]
-mean = [0]
-vc = [0]
-while step < 3500:
+while step < 2000:
     
     vehicle_ids = traci.vehicle.getIDList()
     lane_vehicle_count = defaultdict(int)
     lane_waiting_time = defaultdict(int)
     for v_id in vehicle_ids:
         lane = traci.vehicle.getLaneID(v_id)
-        vType = traci.vehicle.getVehicleClass(v_id)
-        factor = 1
-        if vType == "emergency":
-            factor = 10000
-        lane_vehicle_count[lane] += 100
-        lane_waiting_time[lane] += factor * traci.vehicle.getWaitingTime(v_id)
+        lane_vehicle_count[lane] += 1
+        lane_waiting_time[lane] += traci.vehicle.getWaitingTime(v_id)
 
-    curr_step = (step/4 %2)*2
     traffic_light_ids = traci.trafficlight.getIDList()
+    
     for tl_id in traffic_light_ids:
         id = tl_id
         curr_phase = traci.trafficlight.getPhase(tl_id)
         controlled_lanes = traci.trafficlight.getControlledLanes(tl_id)
         curr_state[tl_id] = State(tl_id,curr_phase,controlled_lanes,lane_waiting_time,lane_vehicle_count,steps_in_phase)    
         action = performAction(agent,curr_state,tl_id)
-        print("Action",action)
-        traci.trafficlight.setPhase(tl_id,(action%2)*2)
-    
-
+        traci.trafficlight.setPhase(tl_id,action*2)
 
     traci.simulationStep()
     
     vehicle_ids = traci.vehicle.getIDList()
     average_waiting_time = 0
-    vehicle_count = 0
+    
     lane_vehicle_count = defaultdict(int)
     lane_waiting_time = defaultdict(int)
     for v_id in vehicle_ids:
         lane = traci.vehicle.getLaneID(v_id)
-        vType = traci.vehicle.getVehicleClass(v_id)
-        factor = 1
-        if vType == "emergency":
-            factor = 1000
         lane_vehicle_count[lane] += 1
-        lane_waiting_time[lane] += factor * traci.vehicle.getWaitingTime(v_id)
-        vehicle_count += 1
+        lane_waiting_time[lane] += traci.vehicle.getWaitingTime(v_id)
 
     
 
@@ -92,27 +79,18 @@ while step < 3500:
         controlled_lanes = traci.trafficlight.getControlledLanes(tl_id)
         observation = [curr_state[tl_id].phase,curr_state[tl_id].steps_in_phase]
         curr_state[tl_id] = State(tl_id,curr_phase,controlled_lanes,lane_waiting_time,lane_vehicle_count,steps_in_phase)
-        vehicle_count = 1
-        lane_count = 1
+        vehicle_count = 0
         for lane in curr_state[tl_id].controlled_lanes:
             average_waiting_time += (1+curr_state[tl_id].lane_waiting_time[lane])/(1+curr_state[tl_id].lane_vehicle_count[lane]);
-            observation.append((1+curr_state[tl_id].lane_waiting_time[lane])/(1+curr_state[tl_id].lane_vehicle_count[lane]))
-            observation.append(curr_state[tl_id].lane_vehicle_count[lane])
+            lane_average = (1+curr_state[tl_id].lane_waiting_time[lane])/(1+curr_state[tl_id].lane_vehicle_count[lane])
             vehicle_count += curr_state[tl_id].lane_vehicle_count[lane]
-            lane_count += 1
-
-        average_waiting_time /= lane_count
-        standard_deviation = 1
-        for lane in curr_state[tl_id].controlled_lanes:
-            standard_deviation += (((1+curr_state[tl_id].lane_waiting_time[lane])/(1+curr_state[tl_id].lane_vehicle_count[lane]))-(average_waiting_time))**2;
-        standard_deviation /= lane_count
-        sd.append(standard_deviation)
-        mean.append(average_waiting_time)
+            observation.append(lane_average)
+            observation.append(curr_state[tl_id].lane_vehicle_count[lane])
+        s.append(step)
+        avg.append(average_waiting_time)
         vc.append(vehicle_count)
-        n = len(mean)
-        reward = - average_waiting_time 
-        print("reward:",reward)
-        print("Standard Deviation:",average_waiting_time,"Mean:",standard_deviation)
+        reward = - average_waiting_time * vehicle_count
+        print("Reward:",reward)
         agent.store_transition(observation, action, reward)
         score += reward
         
@@ -120,20 +98,11 @@ while step < 3500:
     if step%10 == 0:
         score_history.append(score)
         agent.learn()  
-        print('Episode: ', step/4,'score: %.1f' % score)
 
-    x.append(step)
+    
     step += 1
-
-import matplotlib.pyplot as plt
-import numpy as np
-xpoints_scaled = (xpoints - np.min(xpoints)) / (np.max(xpoints) - np.min(xpoints))
-ypoints1_scaled = (ypoints1 - np.min(ypoints1)) / (np.max(ypoints1) - np.min(ypoints1))
-ypoints2_scaled = (ypoints2 - np.min(ypoints2)) / (np.max(ypoints2) - np.min(ypoints2))
-
-plt.plot(xpoints_scaled, ypoints1_scaled, '.')
-plt.plot(xpoints_scaled, ypoints2_scaled, '.')
-plt.show()
-
+import json
+with open('axv.json', 'w') as f:
+    json.dump(avg, f)
 traci.close()
 
